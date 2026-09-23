@@ -1,0 +1,684 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Business {
+  id                 String              @id @default(cuid())
+  name               String
+  legalName          String?
+  timezone           String              @default("Asia/Kolkata")
+  currency           String              @default("INR")
+  address            String?
+  city               String?
+  state              String?
+  pincode            String?
+  phone              String?
+  email              String?
+  gstNumber          String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  accounts           Account[]
+  auditLogs          AuditLog[]
+  whatsappMessages   WhatsAppMessage[]
+  whatsappIncomingMessages WhatsAppIncomingMessage[]
+  whatsappAutomationSetting WhatsAppAutomationSetting?
+  boxes              Box[]
+  customers          Customer[]
+  dayCloses          DayClose[]
+  expenseCategories  ExpenseCategory[]
+  expenses           Expense[]
+  inventoryMovements InventoryMovement[]
+  ledgerEntries      LedgerEntry[]
+  lots               Lot[]
+  payments           Payment[]
+  priceReferences    PriceReference[]
+  products           Product[]
+  purchases          Purchase[]
+  sales              Sale[]
+  suppliers          Supplier[]
+  transfers          Transfer[]
+  users              UserBusiness[]
+
+  @@map("businesses")
+}
+
+model User {
+  id           String         @id @default(cuid())
+  email        String         @unique
+  passwordHash String
+  name         String
+  phone        String?
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  businesses   UserBusiness[]
+
+  @@map("users")
+}
+
+model UserBusiness {
+  id         String    @id @default(cuid())
+  userId     String
+  businessId String
+  role       String    @default("STAFF")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  invitedBy  String?
+  disabledAt DateTime?
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  // Phase 10: members list + the last-active-owner check both scan a
+  // business's memberships by role.
+  @@index([businessId, role])
+  @@map("user_businesses")
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  businessId         String
+  name               String
+  variety            String?
+  grade              String?
+  category           String?
+  primaryUnit        String              @default("BOX")
+  defaultBoxWeightKg Decimal?
+  weightRangeMinKg   Decimal?
+  weightRangeMaxKg   Decimal?
+  shelfLifeDays      Int                 @default(3)
+  defaultMarkupPct   Decimal?
+  minMarginPct       Decimal?
+  reorderThreshold   Int?
+  reorderQty         Int?
+  storageNotes       String?
+  active             Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  boxes              Box[]
+  freshnessProfiles  FreshnessProfile[]
+  inventoryMovements InventoryMovement[]
+  lots               Lot[]
+  priceReferences    PriceReference[]
+  business           Business            @relation(fields: [businessId], references: [id])
+  purchaseItems      PurchaseItem[]
+  saleItems          SaleItem[]
+
+  @@index([businessId])
+  @@index([businessId, name])
+  @@map("products")
+}
+
+model FreshnessProfile {
+  id              String  @id @default(cuid())
+  productId       String
+  dayOffset       Int
+  qualityPct      Decimal
+  status          String
+  priceMultiplier Decimal @default(1.000)
+  product         Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, dayOffset])
+  @@map("freshness_profiles")
+}
+
+model PriceReference {
+  id            String   @id @default(cuid())
+  businessId    String
+  productId     String
+  marketPrice   Decimal
+  source        String   @default("MANUAL")
+  effectiveDate DateTime
+  updatedBy     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  business      Business @relation(fields: [businessId], references: [id])
+  product       Product  @relation(fields: [productId], references: [id])
+
+  @@index([businessId, productId, effectiveDate])
+  @@map("price_references")
+}
+
+model Lot {
+  id                   String              @id @default(cuid())
+  businessId           String
+  productId            String
+  supplierId           String?
+  purchaseId           String?
+  lotReference         String
+  receivedDate         DateTime
+  totalBoxes           Int
+  remainingBoxes       Int
+  totalNetWeightKg     Decimal
+  remainingNetWeightKg Decimal
+  purchaseCost         Decimal
+  landedCost           Decimal
+  costPerBox           Decimal
+  costPerKg            Decimal
+  quality              String              @default("GOOD")
+  freshnessScore       Decimal             @default(100)
+  freshnessStatus      String              @default("FRESH")
+  expiryEstimate       DateTime?
+  status               String              @default("ACTIVE")
+  notes                String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  boxes                Box[]
+  inventoryMovements   InventoryMovement[]
+  business             Business            @relation(fields: [businessId], references: [id])
+  product              Product             @relation(fields: [productId], references: [id])
+  purchase             Purchase?           @relation(fields: [purchaseId], references: [id])
+  supplier             Supplier?           @relation(fields: [supplierId], references: [id])
+  saleItems            SaleItem[]
+
+  @@index([businessId, productId])
+  @@index([businessId, status])
+  @@index([businessId, freshnessStatus])
+  @@map("lots")
+}
+
+model Box {
+  id                 String              @id @default(cuid())
+  businessId         String
+  lotId              String
+  productId          String
+  boxReference       String
+  grossWeightKg      Decimal?
+  tareWeightKg       Decimal?
+  netWeightKg        Decimal
+  purchaseCost       Decimal
+  currentCost        Decimal
+  status             String              @default("IN_STOCK")
+  qualityNotes       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  business           Business            @relation(fields: [businessId], references: [id])
+  lot                Lot                 @relation(fields: [lotId], references: [id])
+  product            Product             @relation(fields: [productId], references: [id])
+  inventoryMovements InventoryMovement[]
+  saleItems          SaleItem[]
+
+  @@index([businessId, lotId])
+  @@index([businessId, status])
+  @@map("boxes")
+}
+
+model InventoryMovement {
+  id               String   @id @default(cuid())
+  businessId       String
+  productId        String
+  lotId            String?
+  boxId            String?
+  transactionType  String
+  transactionId    String
+  movementType     String
+  quantityBoxes    Int      @default(0)
+  quantityWeightKg Decimal?
+  unit             String   @default("BOX")
+  costPerUnit      Decimal
+  totalCost        Decimal
+  businessDate     DateTime
+  systemTimestamp  DateTime @default(now())
+  notes            String?
+  box              Box?     @relation(fields: [boxId], references: [id])
+  business         Business @relation(fields: [businessId], references: [id])
+  lot              Lot?     @relation(fields: [lotId], references: [id])
+  product          Product  @relation(fields: [productId], references: [id])
+
+  @@index([businessId, productId])
+  @@index([businessId, businessDate])
+  @@index([transactionId])
+  @@map("inventory_movements")
+}
+
+model Customer {
+  id              String    @id @default(cuid())
+  businessId      String
+  name            String
+  phone           String?
+  address         String?
+  businessName    String?
+  creditLimit     Decimal?
+  creditTermsDays Int?
+  active          Boolean   @default(true)
+  notes           String?
+  // Phase 12: WhatsApp identity. Deliberately not a second customer
+  // record — see docs/PHASE-12-WHATSAPP.md, "Customer identity". Only an
+  // override when WhatsApp differs from `phone`; normalization happens at
+  // read time (phone.util.ts), never stored pre-normalized here so a
+  // format change to the normalizer doesn't require a backfill.
+  whatsappNumber  String?
+  // Consent is never assumed (section 8) — defaults closed, and every
+  // automated/customer-communication send checks this first.
+  whatsappOptIn   Boolean   @default(false)
+  whatsappOptInAt  DateTime?
+  whatsappOptOutAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  business        Business  @relation(fields: [businessId], references: [id])
+  payments        Payment[]
+  sales           Sale[]
+  whatsappMessages WhatsAppMessage[]
+  whatsappIncomingMessages WhatsAppIncomingMessage[]
+
+  @@index([businessId])
+  @@index([businessId, name])
+  @@map("customers")
+}
+
+model Supplier {
+  id               String     @id @default(cuid())
+  businessId       String
+  name             String
+  phone            String?
+  address          String?
+  businessName     String?
+  paymentTermsDays Int?
+  notes            String?
+  active           Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  lots             Lot[]
+  payments         Payment[]
+  purchases        Purchase[]
+  business         Business   @relation(fields: [businessId], references: [id])
+
+  @@index([businessId])
+  @@index([businessId, name])
+  @@map("suppliers")
+}
+
+model Sale {
+  id              String     @id @default(cuid())
+  businessId      String
+  customerId      String
+  saleReference   String
+  businessDate    DateTime
+  systemTimestamp DateTime   @default(now())
+  subtotal        Decimal
+  discount        Decimal    @default(0)
+  total           Decimal
+  received        Decimal    @default(0)
+  creditAmount    Decimal    @default(0)
+  status          String     @default("COMPLETED")
+  cogs            Decimal    @default(0)
+  grossProfit     Decimal    @default(0)
+  notes           String?
+  createdBy       String?
+  idempotencyKey  String?    @unique
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  payments        Payment[]
+  items           SaleItem[]
+  business        Business   @relation(fields: [businessId], references: [id])
+  customer        Customer   @relation(fields: [customerId], references: [id])
+
+  @@index([businessId, businessDate])
+  @@index([businessId, customerId])
+  @@index([businessId, status])
+  @@map("sales")
+}
+
+model SaleItem {
+  id              String   @id @default(cuid())
+  saleId          String
+  productId       String
+  lotId           String?
+  boxId           String?
+  quantity        Decimal
+  unit            String   @default("BOX")
+  rate            Decimal
+  weightKg        Decimal?
+  total           Decimal
+  costPerUnit     Decimal  @default(0)
+  cogs            Decimal  @default(0)
+  grossProfit     Decimal  @default(0)
+  freshnessAtSale Decimal?
+  box             Box?     @relation(fields: [boxId], references: [id])
+  lot             Lot?     @relation(fields: [lotId], references: [id])
+  product         Product  @relation(fields: [productId], references: [id])
+  sale            Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+  @@map("sale_items")
+}
+
+model Purchase {
+  id                String         @id @default(cuid())
+  businessId        String
+  supplierId        String
+  purchaseReference String
+  businessDate      DateTime
+  systemTimestamp   DateTime       @default(now())
+  subtotal          Decimal
+  transport         Decimal        @default(0)
+  loading           Decimal        @default(0)
+  unloading         Decimal        @default(0)
+  otherCosts        Decimal        @default(0)
+  landedCost        Decimal
+  paid              Decimal        @default(0)
+  creditAmount      Decimal        @default(0)
+  status            String         @default("COMPLETED")
+  notes             String?
+  createdBy         String?
+  idempotencyKey    String?        @unique
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  lots              Lot[]
+  payments          Payment[]
+  items             PurchaseItem[]
+  business          Business       @relation(fields: [businessId], references: [id])
+  supplier          Supplier       @relation(fields: [supplierId], references: [id])
+
+  @@index([businessId, businessDate])
+  @@index([businessId, supplierId])
+  @@index([businessId, status])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id               String   @id @default(cuid())
+  purchaseId       String
+  productId        String
+  quantityBoxes    Int
+  totalNetWeightKg Decimal?
+  avgBoxWeightKg   Decimal?
+  ratePerUnit      Decimal
+  unit             String   @default("BOX")
+  total            Decimal
+  quality          String   @default("GOOD")
+  notes            String?
+  product          Product  @relation(fields: [productId], references: [id])
+  purchase         Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseId])
+  @@map("purchase_items")
+}
+
+model Payment {
+  id                  String    @id @default(cuid())
+  businessId          String
+  transactionType     String
+  saleId              String?
+  purchaseId          String?
+  customerId          String?
+  supplierId          String?
+  amount              Decimal
+  method              String
+  accountId           String?
+  businessDate        DateTime
+  systemTimestamp     DateTime  @default(now())
+  upiSettlementStatus String?
+  status              String    @default("COMPLETED")
+  notes               String?
+  idempotencyKey      String?   @unique
+  createdAt           DateTime  @default(now())
+  account             Account?  @relation(fields: [accountId], references: [id])
+  business            Business  @relation(fields: [businessId], references: [id])
+  customer            Customer? @relation(fields: [customerId], references: [id])
+  purchase            Purchase? @relation(fields: [purchaseId], references: [id])
+  sale                Sale?     @relation(fields: [saleId], references: [id])
+  supplier            Supplier? @relation(fields: [supplierId], references: [id])
+
+  @@index([businessId, businessDate])
+  @@index([saleId])
+  @@index([purchaseId])
+  @@index([customerId])
+  @@index([supplierId])
+  @@map("payments")
+}
+
+model ExpenseCategory {
+  id         String    @id @default(cuid())
+  businessId String
+  name       String
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  business   Business  @relation(fields: [businessId], references: [id])
+  expenses   Expense[]
+
+  @@unique([businessId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id            String          @id @default(cuid())
+  businessId    String
+  categoryId    String
+  description   String?
+  amount        Decimal
+  accountId     String
+  paymentMethod String
+  businessDate  DateTime
+  payee         String?
+  notes         String?
+  createdBy     String?
+  status        String          @default("COMPLETED")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  account       Account         @relation(fields: [accountId], references: [id])
+  business      Business        @relation(fields: [businessId], references: [id])
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([businessId, businessDate])
+  @@index([businessId, categoryId])
+  @@map("expenses")
+}
+
+model Account {
+  id             String        @id @default(cuid())
+  businessId     String
+  name           String
+  type           String
+  openingBalance Decimal       @default(0)
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  business       Business      @relation(fields: [businessId], references: [id])
+  expenses       Expense[]
+  ledgerEntries  LedgerEntry[]
+  payments       Payment[]
+  transfersFrom  Transfer[]    @relation("TransferFrom")
+  transfersTo    Transfer[]    @relation("TransferTo")
+
+  @@unique([businessId, name])
+  @@map("accounts")
+}
+
+model Transfer {
+  id            String   @id @default(cuid())
+  businessId    String
+  fromAccountId String
+  toAccountId   String
+  amount        Decimal
+  businessDate  DateTime
+  notes         String?
+  status        String   @default("COMPLETED")
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  business      Business @relation(fields: [businessId], references: [id])
+  fromAccount   Account  @relation("TransferFrom", fields: [fromAccountId], references: [id])
+  toAccount     Account  @relation("TransferTo", fields: [toAccountId], references: [id])
+
+  @@index([businessId, businessDate])
+  @@map("transfers")
+}
+
+model LedgerEntry {
+  id              String   @id @default(cuid())
+  businessId      String
+  transactionType String
+  transactionId   String
+  accountId       String
+  entityId        String?
+  entityType      String?
+  debit           Decimal  @default(0)
+  credit          Decimal  @default(0)
+  businessDate    DateTime
+  description     String?
+  createdAt       DateTime @default(now())
+  account         Account  @relation(fields: [accountId], references: [id])
+  business        Business @relation(fields: [businessId], references: [id])
+
+  @@index([businessId, transactionId])
+  @@index([businessId, accountId])
+  @@index([businessId, entityId])
+  @@index([businessId, businessDate])
+  @@map("ledger_entries")
+}
+
+model DayClose {
+  id                    String    @id @default(cuid())
+  businessId            String
+  businessDate          DateTime
+  salesTotal            Decimal   @default(0)
+  collectionsTotal      Decimal   @default(0)
+  purchasesTotal        Decimal   @default(0)
+  supplierPaymentsTotal Decimal   @default(0)
+  expensesTotal         Decimal   @default(0)
+  wastageTotal          Decimal   @default(0)
+  expectedCash          Decimal   @default(0)
+  physicalCash          Decimal?
+  difference            Decimal?
+  closedBy              String?
+  closedAt              DateTime?
+  createdAt             DateTime  @default(now())
+  business              Business  @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, businessDate])
+  @@map("day_closes")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String?
+  entityType String
+  entityId   String
+  action     String
+  before     Json?
+  after      Json?
+  reason     String?
+  requestId  String?
+  timestamp  DateTime @default(now())
+  business   Business @relation(fields: [businessId], references: [id])
+
+  @@index([businessId, entityType, entityId])
+  @@index([businessId, timestamp])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------
+// Phase 12 — WhatsApp communication layer.
+//
+// The ERP stays the source of truth: nothing here duplicates a balance,
+// a sale, or a payment. These tables record communication ABOUT those
+// records, never a second copy of them. See
+// docs/PHASE-12-WHATSAPP.md for the full architecture.
+// ---------------------------------------------------------------------
+
+/// One outbound message (queued, sent, or failed). This is the queue
+/// itself — a row with status QUEUED is a pending job; the worker
+/// (WhatsAppQueueProcessor) picks up QUEUED rows and moves them forward.
+/// No separate queue table, per section 32's "reuse what's proportionate."
+model WhatsAppMessage {
+  id                String    @id @default(cuid())
+  businessId        String
+  customerId        String?
+  userId            String?
+  provider          String
+  providerMessageId String?
+  messageType       String
+  templateName      String?
+  // The variables renderTemplate() was given, before rendering —
+  // contentSnapshot is the rendered *text* (what a fake send logs, what
+  // message history shows); a real Meta template send needs these back
+  // out in original form to fill {{1}}, {{2}}... positionally. Null for
+  // a custom message, which has no template.
+  templateVariables Json?
+  recipient         String
+  contentSnapshot   String
+  status            String    @default("QUEUED")
+  // A communication idempotency key (section 30) — e.g.
+  // "SALE:<id>:SALE_CONFIRMATION" for an automated/one-tap send tied to
+  // one ERP record, or a client-supplied UUID for a custom message.
+  // Unique per business: a second attempt with the same key returns the
+  // original row instead of sending twice.
+  idempotencyKey    String
+  relatedEntityType String?
+  relatedEntityId   String?
+  attemptCount      Int       @default(0)
+  failureCode       String?
+  failureReason     String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  failedAt          DateTime?
+  business          Business  @relation(fields: [businessId], references: [id])
+  customer          Customer? @relation(fields: [customerId], references: [id])
+
+  @@unique([businessId, idempotencyKey])
+  @@index([businessId, status])
+  @@index([businessId, customerId])
+  @@index([businessId, relatedEntityType, relatedEntityId])
+  @@index([providerMessageId])
+  @@map("whatsapp_messages")
+}
+
+/// A message received FROM a customer (section 17). Kept separate from
+/// the outbound WhatsAppMessage table — different direction, different
+/// lifecycle, and this phase does no automatic order creation from these
+/// (section 18): they are logged and shown, never auto-actioned.
+model WhatsAppIncomingMessage {
+  id                String    @id @default(cuid())
+  businessId        String
+  customerId        String?
+  fromNumber        String
+  providerMessageId String    @unique
+  content           String
+  receivedAt        DateTime  @default(now())
+  business          Business  @relation(fields: [businessId], references: [id])
+  customer          Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([businessId, customerId])
+  @@index([businessId, receivedAt])
+  @@map("whatsapp_incoming_messages")
+}
+
+/// Webhook delivery dedup (sections 16/46/47) — Meta (and most providers)
+/// can and will redeliver the same event. providerEventId is the
+/// provider's own unique id for the event (a WAMID for a status update or
+/// an incoming message); inserting it here happens inside the same
+/// transaction as the status/message write it causes, so a retried
+/// delivery hits the unique constraint and is treated as already-handled
+/// — the same pattern as Sale/Payment.idempotencyKey, applied to inbound
+/// webhook calls instead of inbound API calls.
+model WhatsAppWebhookEvent {
+  id              String   @id @default(cuid())
+  providerEventId String   @unique
+  eventType       String
+  processedAt     DateTime @default(now())
+
+  @@map("whatsapp_webhook_events")
+}
+
+/// One row per business. Automatic messaging is off by default for every
+/// type (section 28) — an authorized user opts each one in explicitly.
+model WhatsAppAutomationSetting {
+  id                          String   @id @default(cuid())
+  businessId                  String   @unique
+  saleConfirmationEnabled     Boolean  @default(false)
+  paymentReceiptEnabled       Boolean  @default(false)
+  outstandingReminderEnabled  Boolean  @default(false)
+  updatedAt                   DateTime @updatedAt
+  updatedBy                   String?
+  business                    Business @relation(fields: [businessId], references: [id])
+
+  @@map("whatsapp_automation_settings")
+}
