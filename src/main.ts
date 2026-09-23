@@ -51,8 +51,10 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
-  // Global prefix
-  app.setGlobalPrefix('api/v1');
+  // Global prefix — exclude /health so Render's health-check hits the root path
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['health'],
+  });
 
   // Validation
   app.useGlobalPipes(
