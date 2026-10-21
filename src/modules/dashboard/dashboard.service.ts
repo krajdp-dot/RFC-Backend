@@ -394,6 +394,14 @@ export class DashboardService {
     const today = formatBusinessDate(getBusinessDate());
     const from = startDate || today;
     const to = endDate || today;
+    const validDate = (value: string) =>
+      /^\\d{4}-\\d{2}-\\d{2}$/.test(value) &&
+      !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
+      new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+
+    if (!validDate(from) || !validDate(to)) {
+      throw new BadRequestException('Start date and end date must use YYYY-MM-DD.');
+    }
 
     if (from > to) {
       throw new BadRequestException('Start date must be on or before end date.');
