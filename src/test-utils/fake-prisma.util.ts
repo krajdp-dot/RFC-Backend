@@ -105,6 +105,7 @@ type ModelDelegate = {
   findMany: (args?: any) => Promise<any[]>;
   count: (args?: any) => Promise<number>;
   aggregate: (args?: any) => Promise<any>;
+  groupBy: (args: any) => Promise<any[]>;
   create: (args: any) => Promise<any>;
   createMany: (args: any) => Promise<{ count: number }>;
   update: (args: any) => Promise<any>;
@@ -150,6 +151,47 @@ function makeModelDelegate(
     },
     count: async ({ where }: { where?: Record<string, any> } = {}) => {
       return tables[tableName].filter((r) => matches(r, where)).length;
+    },
+    groupBy: async ({
+      by,
+      where,
+      _sum,
+      _count,
+    }: {
+      by: string[];
+      where?: Record<string, any>;
+      _sum?: Record<string, boolean>;
+      _count?: Record<string, boolean>;
+    }) => {
+      const rows = tables[tableName].filter((r) => matches(r, where));
+      const groups = new Map<string, { key: Record<string, any>; rows: any[] }>();
+      for (const row of rows) {
+        const key = Object.fromEntries(by.map((field) => [field, row[field]]));
+        const groupKey = JSON.stringify(key, (_name, value) => value instanceof Date ? value.toISOString() : value);
+        const existing = groups.get(groupKey);
+        if (existing) existing.rows.push(row);
+        else groups.set(groupKey, { key, rows: [row] });
+      }
+
+      return [...groups.values()].map(({ key, rows: groupedRows }) => {
+        const sums: Record<string, any> = {};
+        if (_sum) {
+          for (const field of Object.keys(_sum)) {
+            sums[field] = groupedRows.reduce(
+              (acc, row) => acc.plus(toDecimalSafe(row[field] ?? 0)),
+              new Decimal(0),
+            );
+          }
+        }
+        const count: Record<string, number> = {};
+        if (_count) {
+          if (_count._all) count._all = groupedRows.length;
+          for (const field of Object.keys(_count)) {
+            if (field !== "_all" && _count[field]) count[field] = groupedRows.filter((row) => row[field] != null).length;
+          }
+        }
+        return { ...key, _sum: sums, _count: count };
+      });
     },
     aggregate: async (
       { where, _sum, _max, _min }: {
