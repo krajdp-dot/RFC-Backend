@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ReceivablesService } from '../receivables/receivables.service.js';
 import { PayablesService } from '../payables/payables.service.js';
@@ -7,7 +7,6 @@ import { ReconciliationService } from '../reconciliation/reconciliation.service.
 import { FreshnessService } from '../freshness/freshness.service.js';
 import { toDecimal, sumDecimal, toMoneyString, calcMarginPct } from '../../common/utils/money.util.js';
 import { getTodayRange, formatBusinessDate, getBusinessDate, parseBusinessDate, getDateRange } from '../../common/utils/date.util.js';
-import { BadRequestException } from '@nestjs/common';
 import { Decimal } from 'decimal.js';
 
 @Injectable()
@@ -516,6 +515,7 @@ export class DashboardService {
     ]);
 
     const currencyValue = (value: any) => toMoneyString(value ?? 0);
+    const aggregateCount = (aggregate: any) => typeof aggregate?._count === 'number' ? aggregate._count : aggregate?._count?._all ?? 0;
     const sumGrossProfit = toDecimal(salesAggregate._sum.grossProfit || 0);
     const salesRevenue = toDecimal(salesAggregate._sum.total || 0);
     const grossMarginPct = salesRevenue.gt(0)
@@ -528,15 +528,15 @@ export class DashboardService {
         grossProfit: currencyValue(salesAggregate._sum.grossProfit),
         cogs: currencyValue(salesAggregate._sum.cogs),
         grossMarginPct,
-        count: salesAggregate._count?._all ?? 0,
+        count: aggregateCount(salesAggregate),
       },
       purchases: {
         total: currencyValue(purchasesAggregate._sum.landedCost),
-        count: purchasesAggregate._count?._all ?? 0,
+        count: aggregateCount(purchasesAggregate),
       },
       expenses: {
         total: currencyValue(expensesAggregate._sum.amount),
-        count: expensesAggregate._count?._all ?? 0,
+        count: aggregateCount(expensesAggregate),
       },
     };
 
