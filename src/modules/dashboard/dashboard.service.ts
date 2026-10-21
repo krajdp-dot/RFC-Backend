@@ -8,6 +8,7 @@ import { FreshnessService } from '../freshness/freshness.service.js';
 import { toDecimal, sumDecimal, toMoneyString, calcMarginPct } from '../../common/utils/money.util.js';
 import { getTodayRange, formatBusinessDate, getBusinessDate, parseBusinessDate, getDateRange } from '../../common/utils/date.util.js';
 import { Decimal } from 'decimal.js';
+import { PERMISSIONS, roleHasPermission } from '../auth/authorization/permissions.js';
 
 @Injectable()
 export class DashboardService {
@@ -390,7 +391,16 @@ export class DashboardService {
     startDate?: string,
     endDate?: string,
     requestedGroupBy?: string,
+    role = 'OWNER',
   ) {
+    const canViewReports = roleHasPermission(role, PERMISSIONS.REPORTS_VIEW);
+    const canViewSalesSummary = roleHasPermission(role, PERMISSIONS.SALES_VIEW) || canViewReports;
+    const canViewPurchasesSummary = roleHasPermission(role, PERMISSIONS.PURCHASES_VIEW) || canViewReports;
+    const canViewExpensesSummary = roleHasPermission(role, PERMISSIONS.EXPENSES_VIEW) || canViewReports;
+    const canViewSalesRows = roleHasPermission(role, PERMISSIONS.SALES_VIEW);
+    const canViewPurchaseRows = roleHasPermission(role, PERMISSIONS.PURCHASES_VIEW);
+    const canViewPaymentRows = roleHasPermission(role, PERMISSIONS.PAYMENTS_VIEW);
+    const canViewExpenseRows = roleHasPermission(role, PERMISSIONS.EXPENSES_VIEW);
     const today = formatBusinessDate(getBusinessDate());
     const from = startDate || today;
     const to = endDate || today;
@@ -531,21 +541,21 @@ export class DashboardService {
       : null;
 
     const summary = {
-      sales: {
+      sales: canViewSalesSummary ? {
         total: currencyValue(salesAggregate._sum.total),
         grossProfit: currencyValue(salesAggregate._sum.grossProfit),
         cogs: currencyValue(salesAggregate._sum.cogs),
         grossMarginPct,
         count: aggregateCount(salesAggregate),
-      },
-      purchases: {
+      } : null,
+      purchases: canViewPurchasesSummary ? {
         total: currencyValue(purchasesAggregate._sum.landedCost),
         count: aggregateCount(purchasesAggregate),
-      },
-      expenses: {
+      } : null,
+      expenses: canViewExpensesSummary ? {
         total: currencyValue(expensesAggregate._sum.amount),
         count: aggregateCount(expensesAggregate),
-      },
+      } : null,
     };
 
     const previousSales = toDecimal(priorSalesAggregate._sum.total || 0);
@@ -628,16 +638,16 @@ export class DashboardService {
       .map(([key, b]) => ({
         key,
         label: groupBy === 'month' ? key : groupBy === 'week' ? `Week of ${key}` : key,
-        sales: toMoneyString(b.sales),
-        grossProfit: toMoneyString(b.grossProfit),
-        purchases: toMoneyString(b.purchases),
-        expenses: toMoneyString(b.expenses),
-        saleCount: b.saleCount,
-        purchaseCount: b.purchaseCount,
+        sales: canViewSalesSummary ? toMoneyString(b.sales) : null,
+        grossProfit: canViewSalesSummary ? toMoneyString(b.grossProfit) : null,
+        purchases: canViewPurchasesSummary ? toMoneyString(b.purchases) : null,
+        expenses: canViewExpensesSummary ? toMoneyString(b.expenses) : null,
+        saleCount: canViewSalesRows ? b.saleCount : null,
+        purchaseCount: canViewPurchaseRows ? b.purchaseCount : null,
       }));
 
     const transactions = [
-      ...sales.map((sale: any) => ({
+      ...(canViewSalesRows ? sales : []).map((sale: any) => ({
         id: sale.id,
         reference: sale.saleReference,
         date: dayKey(sale.businessDate),
@@ -650,7 +660,7 @@ export class DashboardService {
         paymentStatus: Number(sale.creditAmount || 0) <= 0 ? 'Paid' : Number(sale.received || 0) > 0 ? 'Partially paid' : 'Unpaid',
         href: '/sales',
       })),
-      ...purchases.map((purchase: any) => ({
+      ...(canViewPurchaseRows ? purchases : []).map((purchase: any) => ({
         id: purchase.id,
         reference: purchase.purchaseReference,
         date: dayKey(purchase.businessDate),
@@ -663,7 +673,7 @@ export class DashboardService {
         paymentStatus: Number(purchase.creditAmount || 0) <= 0 ? 'Paid' : Number(purchase.paid || 0) > 0 ? 'Partially paid' : 'Unpaid',
         href: '/purchases',
       })),
-      ...payments.map((payment: any) => {
+      ...(canViewPaymentRows ? payments : []).map((payment: any) => {
         const supplierPayment = payment.transactionType === 'SUPPLIER_PAYMENT';
         const refund = payment.transactionType === 'REFUND';
         return {
@@ -680,7 +690,7 @@ export class DashboardService {
           href: supplierPayment || (refund && payment.supplierId) ? '/payables' : '/receivables',
         };
       }),
-      ...expenses.map((expense: any) => ({
+      ...(canViewExpenseRows ? expenses : []).map((expense: any) => ({
         id: expense.id,
         reference: '',
         date: dayKey(expense.businessDate),

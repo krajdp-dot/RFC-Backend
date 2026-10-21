@@ -570,4 +570,23 @@ describe('DashboardService.getAnalytics', () => {
       dashboardService.getAnalytics('biz_1', '2026-10-22', '2026-10-21', 'day'),
     ).rejects.toThrow('Start date must be on or before end date.');
   });
+  it('does not expose analytics records or totals for a role without the corresponding permissions', async () => {
+    await build({
+      sale: [
+        { id: 'sale_private', businessId: 'biz_1', customerId: 'cust_a', saleReference: 'RFC-S-PRIVATE', businessDate: TODAY, systemTimestamp: TODAY, total: '1000', cogs: '700', grossProfit: '300', received: '600', creditAmount: '400', status: 'COMPLETED' },
+      ],
+      purchase: [
+        { id: 'purchase_private', businessId: 'biz_1', supplierId: 'sup_a', purchaseReference: 'RFC-P-PRIVATE', businessDate: TODAY, systemTimestamp: TODAY, landedCost: '500', paid: '300', creditAmount: '200', status: 'COMPLETED' },
+      ],
+    });
+
+    const result = await dashboardService.getAnalytics('biz_1', TODAY_STR, TODAY_STR, 'day', 'UNKNOWN');
+
+    expect(result.summary.sales).toBeNull();
+    expect(result.summary.purchases).toBeNull();
+    expect(result.transactions).toHaveLength(0);
+    expect(result.trend[0].sales).toBeNull();
+    expect(result.trend[0].purchases).toBeNull();
+  });
+
 });
