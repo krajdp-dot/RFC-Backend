@@ -504,3 +504,70 @@ describe('DashboardService.getTodayDashboard', () => {
     });
   });
 });
+
+describe('DashboardService.getAnalytics', () => {
+  let dashboardService: DashboardService;
+  let fakePrisma: FakePrismaService;
+
+  async function build(seed: Partial<Record<string, any[]>>) {
+    fakePrisma = new FakePrismaService(seed);
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        DashboardService,
+        ReceivablesService,
+        PayablesService,
+        ExpensesService,
+        ReconciliationService,
+        FreshnessService,
+        { provide: PrismaService, useValue: fakePrisma },
+      ],
+    }).compile();
+    dashboardService = moduleRef.get(DashboardService);
+  }
+
+  it('returns date-filtered real aggregates and trend points, scoped to the current business', async () => {
+    await build({
+      sale: [
+        { id: 'sale_a', businessId: 'biz_1', customerId: 'cust_a', saleReference: 'RFC-S-001', businessDate: TODAY, systemTimestamp: TODAY, total: '1000', cogs: '700', grossProfit: '300', received: '600', creditAmount: '400', status: 'COMPLETED' },
+        { id: 'sale_b', businessId: 'biz_2', customerId: 'cust_b', saleReference: 'OTHER-S-001', businessDate: TODAY, systemTimestamp: TODAY, total: '9999', cogs: '1', grossProfit: '9998', received: '9999', creditAmount: '0', status: 'COMPLETED' },
+      ],
+      purchase: [
+        { id: 'purchase_a', businessId: 'biz_1', supplierId: 'sup_a', purchaseReference: 'RFC-P-001', businessDate: TODAY, systemTimestamp: TODAY, landedCost: '500', paid: '300', creditAmount: '200', status: 'COMPLETED' },
+      ],
+      expense: [
+        { id: 'expense_a', businessId: 'biz_1', categoryId: 'cat_a', description: 'Mandi transport', payee: 'Transporter', amount: '50', businessDate: TODAY, createdAt: TODAY, status: 'COMPLETED' },
+      ],
+    });
+
+    const result = await dashboardService.getAnalytics('biz_1', TODAY_STR, TODAY_STR, 'day');
+
+    expect(result.range).toMatchObject({ startDate: TODAY_STR, endDate: TODAY_STR, groupBy: 'day' });
+    expect(result.summary.sales).toMatchObject({
+      total: '1000.00',
+      cogs: '700.00',
+      grossProfit: '300.00',
+      grossMarginPct: '30.00',
+      count: 1,
+    });
+    expect(result.summary.purchases).toMatchObject({ total: '500.00', count: 1 });
+    expect(result.summary.expenses).toMatchObject({ total: '50.00', count: 1 });
+    expect(result.trend).toHaveLength(1);
+    expect(result.trend[0]).toMatchObject({
+      key: TODAY_STR,
+      sales: '1000.00',
+      purchases: '500.00',
+      expenses: '50.00',
+      grossProfit: '300.00',
+      saleCount: 1,
+      purchaseCount: 1,
+    });
+    expect(result.transactions.map((transaction: any) => transaction.id)).not.toContain('sale_b');
+  });
+
+  it('rejects a reversed date range rather than returning misleading analytics', async () => {
+    await build({});
+    await expect(
+      dashboardService.getAnalytics('biz_1', '2026-10-22', '2026-10-21', 'day'),
+    ).rejects.toThrow('Start date must be on or before end date.');
+  });
+});
