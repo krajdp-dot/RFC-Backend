@@ -6,7 +6,8 @@ import { ExpensesService } from '../expenses/expenses.service.js';
 import { ReconciliationService } from '../reconciliation/reconciliation.service.js';
 import { FreshnessService } from '../freshness/freshness.service.js';
 import { toDecimal, sumDecimal, toMoneyString, calcMarginPct } from '../../common/utils/money.util.js';
-import { getTodayRange, formatBusinessDate, getBusinessDate, parseBusinessDate } from '../../common/utils/date.util.js';
+import { getTodayRange, formatBusinessDate, getBusinessDate, parseBusinessDate, getDateRange } from '../../common/utils/date.util.js';
+import { BadRequestException } from '@nestjs/common';
 import { Decimal } from 'decimal.js';
 
 @Injectable()
@@ -375,6 +376,314 @@ export class DashboardService {
       },
       alerts,
       recentActivity,
+    };
+  }
+
+
+  /**
+   * Period analytics for the dashboard. All totals are database aggregates;
+   * trend points are grouped from the same business-date rows and the recent
+   * activity list is bounded independently. No client-side summing of a
+   * truncated page is used for financial totals.
+   */
+  async getAnalytics(
+    businessId: string,
+    startDate?: string,
+    endDate?: string,
+    requestedGroupBy?: string,
+  ) {
+    const today = formatBusinessDate(getBusinessDate());
+    const from = startDate || today;
+    const to = endDate || today;
+
+    if (from > to) {
+      throw new BadRequestException('Start date must be on or before end date.');
+    }
+
+    const { start, end } = getDateRange(from, to);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const rangeDays = Math.max(
+      1,
+      Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / dayMs) + 1,
+    );
+    const priorEndDate = new Date(Date.parse(`${from}T00:00:00Z`) - dayMs).toISOString().slice(0, 10);
+    const priorStartDate = new Date(Date.parse(`${priorEndDate}T00:00:00Z`) - (rangeDays - 1) * dayMs).toISOString().slice(0, 10);
+    const priorRange = getDateRange(priorStartDate, priorEndDate);
+    const groupBy: 'day' | 'week' | 'month' =
+      requestedGroupBy === 'week' || requestedGroupBy === 'month'
+        ? requestedGroupBy
+        : 'day';
+
+    const saleWhere = { businessId, businessDate: { gte: start, lte: end } };
+    const purchaseWhere = { businessId, businessDate: { gte: start, lte: end } };
+    const expenseWhere = { businessId, businessDate: { gte: start, lte: end } };
+    const priorSaleWhere = { businessId, businessDate: priorRange };
+    const priorPurchaseWhere = { businessId, businessDate: priorRange };
+    const priorExpenseWhere = { businessId, businessDate: priorRange };
+
+    const [
+      salesAggregate,
+      purchasesAggregate,
+      expensesAggregate,
+      priorSalesAggregate,
+      priorPurchasesAggregate,
+      priorExpensesAggregate,
+      salesByDate,
+      purchasesByDate,
+      expensesByDate,
+      sales,
+      purchases,
+      payments,
+      expenses,
+    ] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: saleWhere,
+        _sum: { total: true, cogs: true, grossProfit: true },
+        _count: { _all: true },
+      }),
+      this.prisma.purchase.aggregate({
+        where: purchaseWhere,
+        _sum: { landedCost: true },
+        _count: { _all: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: expenseWhere,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.sale.aggregate({
+        where: priorSaleWhere,
+        _sum: { total: true, cogs: true, grossProfit: true },
+        _count: { _all: true },
+      }),
+      this.prisma.purchase.aggregate({
+        where: priorPurchaseWhere,
+        _sum: { landedCost: true },
+        _count: { _all: true },
+      }),
+      this.prisma.expense.aggregate({
+        where: priorExpenseWhere,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.sale.groupBy({
+        by: ['businessDate'],
+        where: saleWhere,
+        _sum: { total: true, grossProfit: true },
+        _count: { _all: true },
+      }),
+      this.prisma.purchase.groupBy({
+        by: ['businessDate'],
+        where: purchaseWhere,
+        _sum: { landedCost: true },
+        _count: { _all: true },
+      }),
+      this.prisma.expense.groupBy({
+        by: ['businessDate'],
+        where: expenseWhere,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.sale.findMany({
+        where: saleWhere,
+        orderBy: [{ businessDate: 'desc' }, { systemTimestamp: 'desc' }],
+        take: 25,
+        include: { customer: { select: { id: true, name: true } } },
+      }),
+      this.prisma.purchase.findMany({
+        where: purchaseWhere,
+        orderBy: [{ businessDate: 'desc' }, { systemTimestamp: 'desc' }],
+        take: 25,
+        include: { supplier: { select: { id: true, name: true } } },
+      }),
+      this.prisma.payment.findMany({
+        where: { businessId, businessDate: { gte: start, lte: end } },
+        orderBy: [{ businessDate: 'desc' }, { systemTimestamp: 'desc' }],
+        take: 25,
+        include: {
+          customer: { select: { id: true, name: true } },
+          supplier: { select: { id: true, name: true } },
+          sale: { select: { saleReference: true } },
+          purchase: { select: { purchaseReference: true } },
+        },
+      }),
+      this.prisma.expense.findMany({
+        where: expenseWhere,
+        orderBy: [{ businessDate: 'desc' }, { createdAt: 'desc' }],
+        take: 25,
+        include: { category: { select: { name: true } }, account: { select: { name: true } } },
+      }),
+    ]);
+
+    const currencyValue = (value: any) => toMoneyString(value ?? 0);
+    const sumGrossProfit = toDecimal(salesAggregate._sum.grossProfit || 0);
+    const salesRevenue = toDecimal(salesAggregate._sum.total || 0);
+    const grossMarginPct = salesRevenue.gt(0)
+      ? sumGrossProfit.div(salesRevenue).times(100).toDecimalPlaces(2).toFixed(2)
+      : null;
+
+    const summary = {
+      sales: {
+        total: currencyValue(salesAggregate._sum.total),
+        grossProfit: currencyValue(salesAggregate._sum.grossProfit),
+        cogs: currencyValue(salesAggregate._sum.cogs),
+        grossMarginPct,
+        count: salesAggregate._count?._all ?? 0,
+      },
+      purchases: {
+        total: currencyValue(purchasesAggregate._sum.landedCost),
+        count: purchasesAggregate._count?._all ?? 0,
+      },
+      expenses: {
+        total: currencyValue(expensesAggregate._sum.amount),
+        count: expensesAggregate._count?._all ?? 0,
+      },
+    };
+
+    const previousSales = toDecimal(priorSalesAggregate._sum.total || 0);
+    const previousPurchases = toDecimal(priorPurchasesAggregate._sum.landedCost || 0);
+    const previousExpenses = toDecimal(priorExpensesAggregate._sum.amount || 0);
+    const pctChange = (current: any, prior: any) => {
+      const before = toDecimal(prior || 0);
+      const now = toDecimal(current || 0);
+      if (before.eq(0)) return now.eq(0) ? null : null;
+      return now.minus(before).div(before.abs()).times(100).toDecimalPlaces(1).toNumber();
+    };
+
+    const previous = {
+      startDate: priorStartDate,
+      endDate: priorEndDate,
+      sales: currencyValue(priorSalesAggregate._sum.total),
+      grossProfit: currencyValue(priorSalesAggregate._sum.grossProfit),
+      purchases: currencyValue(priorPurchasesAggregate._sum.landedCost),
+      expenses: currencyValue(priorExpensesAggregate._sum.amount),
+    };
+
+    const dayKey = (date: Date) => formatBusinessDate(date);
+    const bucketKey = (date: Date) => {
+      const key = dayKey(date);
+      if (groupBy === 'month') return key.slice(0, 7);
+      if (groupBy === 'week') {
+        const d = new Date(`${key}T00:00:00Z`);
+        const daysSinceMonday = (d.getUTCDay() + 6) % 7;
+        d.setUTCDate(d.getUTCDate() - daysSinceMonday);
+        return d.toISOString().slice(0, 10);
+      }
+      return key;
+    };
+
+    const bucketMap = new Map<string, { sales: Decimal; grossProfit: Decimal; purchases: Decimal; expenses: Decimal; saleCount: number; purchaseCount: number }>();
+    const touchBucket = (key: string) => {
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, { sales: new Decimal(0), grossProfit: new Decimal(0), purchases: new Decimal(0), expenses: new Decimal(0), saleCount: 0, purchaseCount: 0 });
+      }
+      return bucketMap.get(key)!;
+    };
+    for (const row of salesByDate) {
+      const b = touchBucket(bucketKey(row.businessDate));
+      b.sales = b.sales.plus(toDecimal(row._sum.total || 0));
+      b.grossProfit = b.grossProfit.plus(toDecimal(row._sum.grossProfit || 0));
+      b.saleCount += row._count?._all ?? 0;
+    }
+    for (const row of purchasesByDate) {
+      const b = touchBucket(bucketKey(row.businessDate));
+      b.purchases = b.purchases.plus(toDecimal(row._sum.landedCost || 0));
+      b.purchaseCount += row._count?._all ?? 0;
+    }
+    for (const row of expensesByDate) {
+      const b = touchBucket(bucketKey(row.businessDate));
+      b.expenses = b.expenses.plus(toDecimal(row._sum.amount || 0));
+    }
+
+    const trend = [...bucketMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, b]) => ({
+        key,
+        label: groupBy === 'month' ? key : groupBy === 'week' ? `Week of ${key}` : key,
+        sales: toMoneyString(b.sales),
+        grossProfit: toMoneyString(b.grossProfit),
+        purchases: toMoneyString(b.purchases),
+        expenses: toMoneyString(b.expenses),
+        saleCount: b.saleCount,
+        purchaseCount: b.purchaseCount,
+      }));
+
+    const transactions = [
+      ...sales.map((sale: any) => ({
+        id: sale.id,
+        reference: sale.saleReference,
+        date: dayKey(sale.businessDate),
+        timestamp: sale.systemTimestamp || sale.createdAt,
+        party: sale.customer?.name || 'Customer',
+        partyId: sale.customer?.id,
+        type: 'SALE',
+        amount: currencyValue(sale.total),
+        status: sale.status || 'COMPLETED',
+        paymentStatus: Number(sale.creditAmount || 0) <= 0 ? 'Paid' : Number(sale.received || 0) > 0 ? 'Partially paid' : 'Unpaid',
+        href: '/sales',
+      })),
+      ...purchases.map((purchase: any) => ({
+        id: purchase.id,
+        reference: purchase.purchaseReference,
+        date: dayKey(purchase.businessDate),
+        timestamp: purchase.systemTimestamp || purchase.createdAt,
+        party: purchase.supplier?.name || 'Supplier',
+        partyId: purchase.supplier?.id,
+        type: 'PURCHASE',
+        amount: currencyValue(purchase.landedCost),
+        status: purchase.status || 'COMPLETED',
+        paymentStatus: Number(purchase.creditAmount || 0) <= 0 ? 'Paid' : Number(purchase.paid || 0) > 0 ? 'Partially paid' : 'Unpaid',
+        href: '/purchases',
+      })),
+      ...payments.map((payment: any) => {
+        const supplierPayment = payment.transactionType === 'SUPPLIER_PAYMENT';
+        const refund = payment.transactionType === 'REFUND';
+        return {
+          id: payment.id,
+          reference: payment.sale?.saleReference || payment.purchase?.purchaseReference || '',
+          date: dayKey(payment.businessDate),
+          timestamp: payment.systemTimestamp || payment.createdAt,
+          party: payment.customer?.name || payment.supplier?.name || (refund ? 'Refund' : supplierPayment ? 'Supplier payment' : 'Customer payment'),
+          partyId: payment.customer?.id || payment.supplier?.id,
+          type: refund ? 'REFUND' : supplierPayment ? 'PAYMENT_OUT' : 'PAYMENT_IN',
+          amount: currencyValue(payment.amount),
+          status: payment.status || 'COMPLETED',
+          paymentStatus: payment.status || 'COMPLETED',
+          href: supplierPayment ? '/payables' : '/receivables',
+        };
+      }),
+      ...expenses.map((expense: any) => ({
+        id: expense.id,
+        reference: '',
+        date: dayKey(expense.businessDate),
+        timestamp: expense.createdAt,
+        party: expense.payee || expense.category?.name || 'Expense',
+        partyId: undefined,
+        type: 'EXPENSE',
+        amount: currencyValue(expense.amount),
+        status: expense.status || 'COMPLETED',
+        paymentStatus: expense.account?.name ? `Paid from ${expense.account.name}` : 'Recorded',
+        href: '/expenses',
+      })),
+    ].sort((a, b) => new Date(b.timestamp || b.date).getTime() - new Date(a.timestamp || a.date).getTime()).slice(0, 25);
+
+    return {
+      range: { startDate: from, endDate: to, groupBy },
+      summary,
+      previous,
+      changes: {
+        salesPct: pctChange(summary.sales.total, previous.sales),
+        purchasesPct: pctChange(summary.purchases.total, previous.purchases),
+        expensesPct: pctChange(summary.expenses.total, previous.expenses),
+        grossProfitPct: pctChange(summary.sales.grossProfit, previous.grossProfit),
+      },
+      trend,
+      transactions,
+      recentLimit: 25,
+      comparisonAvailable: !(
+        previousSales.eq(0) && previousPurchases.eq(0) && previousExpenses.eq(0) &&
+        toDecimal(priorSalesAggregate._sum.grossProfit || 0).eq(0)
+      ),
     };
   }
 
