@@ -546,7 +546,7 @@ export class DashboardService {
     const pctChange = (current: any, prior: any) => {
       const before = toDecimal(prior || 0);
       const now = toDecimal(current || 0);
-      if (before.eq(0)) return now.eq(0) ? null : null;
+      if (before.eq(0)) return null;
       return now.minus(before).div(before.abs()).times(100).toDecimalPlaces(1).toNumber();
     };
 
@@ -668,8 +668,8 @@ export class DashboardService {
           type: refund ? 'REFUND' : supplierPayment ? 'PAYMENT_OUT' : 'PAYMENT_IN',
           amount: currencyValue(payment.amount),
           status: payment.status || 'COMPLETED',
-          paymentStatus: payment.status || 'COMPLETED',
-          href: supplierPayment ? '/payables' : '/receivables',
+          paymentStatus: payment.status === 'COMPLETED' ? 'Recorded' : payment.status || 'Recorded',
+          href: supplierPayment || (refund && payment.supplierId) ? '/payables' : '/receivables',
         };
       }),
       ...expenses.map((expense: any) => ({
