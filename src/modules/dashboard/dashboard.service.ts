@@ -416,9 +416,9 @@ export class DashboardService {
     const saleWhere = { businessId, businessDate: { gte: start, lte: end } };
     const purchaseWhere = { businessId, businessDate: { gte: start, lte: end } };
     const expenseWhere = { businessId, businessDate: { gte: start, lte: end } };
-    const priorSaleWhere = { businessId, businessDate: priorRange };
-    const priorPurchaseWhere = { businessId, businessDate: priorRange };
-    const priorExpenseWhere = { businessId, businessDate: priorRange };
+    const priorSaleWhere = { businessId, businessDate: { gte: priorRange.start, lte: priorRange.end } };
+    const priorPurchaseWhere = { businessId, businessDate: { gte: priorRange.start, lte: priorRange.end } };
+    const priorExpenseWhere = { businessId, businessDate: { gte: priorRange.start, lte: priorRange.end } };
 
     const [
       salesAggregate,
@@ -579,6 +579,26 @@ export class DashboardService {
       }
       return bucketMap.get(key)!;
     };
+    // Include quiet dates as real zero-activity buckets so the chart's
+    // time axis is continuous rather than silently omitting days with no posts.
+    for (
+      let cursor = Date.parse(`${from}T00:00:00Z`);
+      cursor <= Date.parse(`${to}T00:00:00Z`);
+      cursor += dayMs
+    ) {
+      const dateLabel = new Date(cursor).toISOString().slice(0, 10);
+      let key = dateLabel;
+      if (groupBy === 'month') {
+        key = dateLabel.slice(0, 7);
+      } else if (groupBy === 'week') {
+        const d = new Date(`${dateLabel}T00:00:00Z`);
+        const daysSinceMonday = (d.getUTCDay() + 6) % 7;
+        d.setUTCDate(d.getUTCDate() - daysSinceMonday);
+        key = d.toISOString().slice(0, 10);
+      }
+      touchBucket(key);
+    }
+
     for (const row of salesByDate) {
       const b = touchBucket(bucketKey(row.businessDate));
       b.sales = b.sales.plus(toDecimal(row._sum.total || 0));
