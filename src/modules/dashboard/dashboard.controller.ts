@@ -1,4 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
@@ -27,8 +28,9 @@ export class DashboardController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('groupBy') groupBy?: string,
+    @CurrentUser('role') role?: string,
   ) {
-    return this.dashboardService.getAnalytics(businessId, startDate, endDate, groupBy);
+    return this.dashboardService.getAnalytics(businessId, startDate, endDate, groupBy, role || 'UNKNOWN');
   }
 
   @Get('reorder')
