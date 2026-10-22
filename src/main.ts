@@ -44,8 +44,26 @@ async function bootstrap() {
     !isProd ? 'http://localhost:3000' : null,
   ].filter(Boolean) as string[];
 
+  // Allow deployment previews created by this RFC frontend Vercel project,
+  // without opening credentialed API access to arbitrary *.vercel.app sites.
+  // Examples:
+  // - rfc-frontend-git-feature-name-hash-krajdp-4226s-projects.vercel.app
+  // - rfc-frontend-deploymenthash-krajdp-4226s-projects.vercel.app
+  const isTrustedFrontendPreview = (origin: string) => {
+    try {
+      const url = new URL(origin);
+      return url.protocol === 'https:' &&
+        /^rfc-frontend(?:-git-[a-z0-9-]+|-[a-z0-9]+)-krajdp-4226s-projects\.vercel\.app$/i.test(url.hostname);
+    } catch {
+      return false;
+    }
+  };
+
   app.enableCors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      const allowed = !origin || allowedOrigins.includes(origin) || isTrustedFrontendPreview(origin);
+      callback(null, allowed);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
