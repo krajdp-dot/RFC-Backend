@@ -190,7 +190,6 @@ export class ExpensesService {
           entityId: expense.id,
           action: 'DELETE',
           before,
-          after: null,
           reason: reason?.trim() || 'Mistaken expense entry deleted',
         },
       });
