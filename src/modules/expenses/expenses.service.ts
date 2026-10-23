@@ -149,6 +149,58 @@ export class ExpensesService {
     })), total, paginationDto.page || 1, paginationDto.limit || 20);
   }
 
+
+  /**
+   * Delete a mistaken expense only while its business date is still open.
+   * The expense and both ledger legs are removed atomically; an audit row
+   * is retained so the correction remains traceable.
+   */
+  async deleteExpense(businessId: string, expenseId: string, userId: string, reason?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.expense.findFirst({
+        where: { id: expenseId, businessId },
+        include: { category: { select: { name: true } } },
+      });
+      if (!expense) throw new NotFoundException('Expense not found');
+
+      const { formatBusinessDate } = await import('../../common/utils/date.util.js');
+      await assertBusinessDateOpen(tx, businessId, formatBusinessDate(expense.businessDate));
+
+      const before = {
+        id: expense.id,
+        categoryId: expense.categoryId,
+        categoryName: expense.category?.name ?? null,
+        description: expense.description,
+        amount: String(expense.amount),
+        accountId: expense.accountId,
+        paymentMethod: expense.paymentMethod,
+        businessDate: expense.businessDate.toISOString(),
+        payee: expense.payee,
+        notes: expense.notes,
+      };
+
+      await tx.ledgerEntry.deleteMany({
+        where: { businessId, transactionType: 'EXPENSE', transactionId: expense.id },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId,
+          entityType: 'EXPENSE',
+          entityId: expense.id,
+          action: 'DELETE',
+          before,
+          after: null,
+          reason: reason?.trim() || 'Mistaken expense entry deleted',
+        },
+      });
+
+      await tx.expense.delete({ where: { id: expense.id } });
+      return { success: true, id: expense.id, message: 'Expense deleted and ledger entries reversed.' };
+    });
+  }
+
   async getExpenseSummary(businessId: string, startDate?: string, endDate?: string) {
     const where: Prisma.ExpenseWhereInput = {
       businessId,
