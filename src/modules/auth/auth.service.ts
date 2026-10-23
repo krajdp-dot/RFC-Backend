@@ -100,7 +100,7 @@ export class AuthService {
     // with the rest of this codebase's testable-against-the-fake-double
     // convention (see receivables/payables/expenses/freshness services
     // from earlier phases for the same fix, for the same reason).
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.prisma.user.findFirst({ where: { email: { equals: dto.email.trim(), mode: 'insensitive' } } });
 
     // Section 8: don't let a login attempt reveal whether an email exists —
     // same message and control flow whether the account is missing or the
