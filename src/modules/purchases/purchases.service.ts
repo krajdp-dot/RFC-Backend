@@ -254,6 +254,83 @@ export class PurchasesService {
     });
   }
 
+  async deletePurchase(businessId: string, purchaseId: string, userId: string, reason?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findFirst({ where: { id: purchaseId, businessId } });
+      if (!purchase) throw new NotFoundException('Purchase not found');
+
+      await assertBusinessDateOpen(tx, businessId, purchase.businessDate.toISOString().slice(0, 10));
+
+      const payments = await tx.payment.count({ where: { businessId, purchaseId: purchase.id } });
+      if (payments > 0 || Number(purchase.paid) > 0) {
+        throw new BadRequestException('This purchase has linked payments. Reverse/refund the payment first before deleting the purchase.');
+      }
+
+      const lots = await tx.lot.findMany({ where: { businessId, purchaseId: purchase.id } });
+      const lotIds = lots.map((lot: any) => lot.id);
+      if (lotIds.length) {
+        const boxes = await tx.box.count({ where: { businessId, lotId: { in: lotIds } } });
+        if (boxes > 0) {
+          throw new BadRequestException('This purchase has box-level records. It cannot be deleted safely; preserve the history and correct it with an adjustment.');
+        }
+
+        const saleItems = await tx.saleItem.count({ where: { lotId: { in: lotIds } } });
+        if (saleItems > 0) {
+          throw new BadRequestException('Stock from this purchase has been used in sales. It cannot be deleted safely.');
+        }
+
+        for (const lot of lots) {
+          const remainingWeight = Number(lot.remainingNetWeightKg ?? 0);
+          const totalWeight = Number(lot.totalNetWeightKg ?? 0);
+          if (lot.remainingBoxes !== lot.totalBoxes || Math.abs(remainingWeight - totalWeight) > 0.01) {
+            throw new BadRequestException('Stock from this purchase has changed. It cannot be deleted safely.');
+          }
+        }
+
+        const otherMovements = await tx.inventoryMovement.count({
+          where: { businessId, lotId: { in: lotIds }, transactionType: { not: 'PURCHASE' } },
+        });
+        if (otherMovements > 0) {
+          throw new BadRequestException('This purchase has returns or other stock movements. It cannot be deleted safely.');
+        }
+      }
+
+      const before = {
+        id: purchase.id,
+        purchaseReference: purchase.purchaseReference,
+        supplierId: purchase.supplierId,
+        businessDate: purchase.businessDate.toISOString(),
+        landedCost: String(purchase.landedCost),
+        paid: String(purchase.paid),
+        creditAmount: String(purchase.creditAmount),
+      };
+
+      await tx.inventoryMovement.deleteMany({
+        where: { businessId, transactionType: 'PURCHASE', transactionId: purchase.id },
+      });
+      if (lotIds.length) {
+        await tx.inventoryMovement.deleteMany({ where: { businessId, lotId: { in: lotIds } } });
+        await tx.lot.deleteMany({ where: { businessId, id: { in: lotIds } } });
+      }
+      await tx.ledgerEntry.deleteMany({
+        where: { businessId, transactionType: 'PURCHASE', transactionId: purchase.id },
+      });
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId,
+          entityType: 'PURCHASE',
+          entityId: purchase.id,
+          action: 'DELETE',
+          before,
+          reason: reason?.trim() || 'Mistaken purchase entry deleted',
+        },
+      });
+      await tx.purchase.delete({ where: { id: purchase.id } });
+      return { success: true, id: purchase.id, message: 'Purchase deleted; its unused stock and ledger entries were removed.' };
+    });
+  }
+
   // B7: Purchase Return
   async processPurchaseReturn(businessId: string, dto: {
     purchaseId: string;
