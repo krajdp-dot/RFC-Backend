@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SalesService } from './sales.service.js';
 import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { PaginationDto } from '../../common/dto/pagination.dto.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../auth/authorization/require-permission.decorator.js';
 import { PERMISSIONS } from '../auth/authorization/permissions.js';
@@ -40,6 +41,18 @@ export class SalesController {
   @RequirePermission(PERMISSIONS.SALES_CREATE)
   create(@CurrentBusiness() businessId: string, @Body() dto: CreateSaleDto) {
     return this.salesService.createSale(businessId, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a mistaken sale when it has no payments or returns' })
+  @RequirePermission(PERMISSIONS.SALES_DELETE)
+  deleteSale(
+    @CurrentBusiness() businessId: string,
+    @Param('id') id: string,
+    @CurrentUser('userId') userId: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.salesService.deleteSale(businessId, id, userId, body?.reason);
   }
 
   @Post('returns')
