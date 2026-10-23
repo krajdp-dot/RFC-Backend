@@ -91,6 +91,28 @@ export class ProductsService {
     });
   }
 
+  async deleteProduct(businessId: string, id: string, userId: string, reason?: string) {
+    const product = await this.findOne(businessId, id);
+    if (!product.active) return { success: true, id, message: 'Product is already archived.' };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.product.updateMany({ where: { id, businessId }, data: { active: false } });
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId,
+          entityType: 'PRODUCT',
+          entityId: id,
+          action: 'DELETE',
+          before: { id, name: product.name, category: product.category, active: product.active },
+          after: { id, name: product.name, category: product.category, active: false },
+          reason: reason?.trim() || 'Product removed from active catalogue; historical records preserved',
+        },
+      });
+    });
+    return { success: true, id, message: 'Product removed from active catalogue. Historical transactions are preserved.' };
+  }
+
   async getFreshnessProfile(businessId: string, id: string) {
     const product = await this.findOne(businessId, id);
     return product.freshnessProfiles;
