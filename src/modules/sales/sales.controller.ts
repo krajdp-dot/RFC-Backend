@@ -5,7 +5,6 @@ import { CreateSaleDto } from './dto/create-sale.dto.js';
 import { PaginationDto } from '../../common/dto/pagination.dto.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
-import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../auth/authorization/require-permission.decorator.js';
 import { PERMISSIONS } from '../auth/authorization/permissions.js';
 
