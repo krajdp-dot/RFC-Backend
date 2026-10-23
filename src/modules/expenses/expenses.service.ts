@@ -6,7 +6,7 @@ import { PaginationDto, paginatedResponse } from '../../common/dto/pagination.dt
 import { Prisma } from '@prisma/client';
 import { Decimal } from 'decimal.js';
 import { toMoneyString } from '../../common/utils/money.util.js';
-import { parseBusinessDate, getDateRange } from '../../common/utils/date.util.js';
+import { parseBusinessDate, getDateRange, formatBusinessDate } from '../../common/utils/date.util.js';
 import { assertBusinessDateOpen } from '../../common/utils/business-date-guard.util.js';
 
 @Injectable()
@@ -163,7 +163,6 @@ export class ExpensesService {
       });
       if (!expense) throw new NotFoundException('Expense not found');
 
-      const { formatBusinessDate } = await import('../../common/utils/date.util.js');
       await assertBusinessDateOpen(tx, businessId, formatBusinessDate(expense.businessDate));
 
       const before = {
