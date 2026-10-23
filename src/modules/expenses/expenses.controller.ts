@@ -42,6 +42,18 @@ export class ExpensesController {
     return this.expensesService.create(businessId, createExpenseDto);
   }
 
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a mistaken expense and reverse its ledger entries' })
+  @RequirePermission(PERMISSIONS.EXPENSES_DELETE)
+  removeExpense(
+    @CurrentBusiness() businessId: string,
+    @Param('id') id: string,
+    @CurrentUser('userId') userId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.expensesService.deleteExpense(businessId, id, userId, body?.reason);
+  }
+
   @Get()
   @ApiOperation({ summary: 'List expenses with pagination and filters' })
   @ApiQuery({ name: 'categoryId', required: false })
