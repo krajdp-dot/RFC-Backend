@@ -357,6 +357,72 @@ export class SalesService {
     return sale;
   }
 
+  async deleteSale(businessId: string, saleId: string, userId: string, reason?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirst({ where: { id: saleId, businessId } });
+      if (!sale) throw new NotFoundException('Sale not found');
+
+      await assertBusinessDateOpen(tx, businessId, sale.businessDate.toISOString().slice(0, 10));
+
+      const payments = await tx.payment.count({ where: { businessId, saleId: sale.id } });
+      if (payments > 0 || Number(sale.received) > 0) {
+        throw new BadRequestException('This sale has linked payments. Refund/reverse the payment first before deleting the sale.');
+      }
+
+      const customerReturns = await tx.inventoryMovement.count({
+        where: { businessId, transactionType: 'CUSTOMER_RETURN', transactionId: sale.id },
+      });
+      if (customerReturns > 0) {
+        throw new BadRequestException('This sale has customer returns. It cannot be deleted safely; keep the audit trail and correct it with a return/reversal.');
+      }
+
+      const movements = await tx.inventoryMovement.findMany({
+        where: { businessId, transactionType: 'SALE', transactionId: sale.saleReference },
+      });
+      for (const movement of movements) {
+        if (!movement.lotId) continue;
+        await tx.lot.updateMany({
+          where: { id: movement.lotId, businessId },
+          data: {
+            remainingBoxes: { increment: Math.abs(movement.quantityBoxes) },
+            remainingNetWeightKg: { increment: Math.abs(Number(movement.quantityWeightKg ?? 0)) },
+            status: LotStatus.ACTIVE,
+          },
+        });
+      }
+
+      const before = {
+        id: sale.id,
+        saleReference: sale.saleReference,
+        customerId: sale.customerId,
+        businessDate: sale.businessDate.toISOString(),
+        total: String(sale.total),
+        received: String(sale.received),
+        creditAmount: String(sale.creditAmount),
+      };
+
+      await tx.inventoryMovement.deleteMany({
+        where: { businessId, transactionType: 'SALE', transactionId: sale.saleReference },
+      });
+      await tx.ledgerEntry.deleteMany({
+        where: { businessId, transactionType: 'SALE', transactionId: sale.id },
+      });
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId,
+          entityType: 'SALE',
+          entityId: sale.id,
+          action: 'DELETE',
+          before,
+          reason: reason?.trim() || 'Mistaken sale entry deleted',
+        },
+      });
+      await tx.sale.delete({ where: { id: sale.id } });
+      return { success: true, id: sale.id, message: 'Sale deleted; stock and ledger entries restored.' };
+    });
+  }
+
   // B7: Customer Return
   async processReturn(businessId: string, dto: {
     saleId: string;
