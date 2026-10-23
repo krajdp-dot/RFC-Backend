@@ -24,6 +24,7 @@ export const PERMISSIONS = {
   SALES_VIEW: 'sales.view',
   SALES_CREATE: 'sales.create',
   SALES_RETURN: 'sales.return',
+  SALES_DELETE: 'sales.delete',
 
   PURCHASES_VIEW: 'purchases.view',
   PURCHASES_CREATE: 'purchases.create',
@@ -78,6 +79,7 @@ export const PERMISSIONS = {
 
   PRODUCTS_VIEW: 'products.view',
   PRODUCTS_EDIT: 'products.edit',
+  PRODUCTS_DELETE: 'products.delete',
 
   USERS_VIEW: 'users.view',
   USERS_INVITE: 'users.invite',
