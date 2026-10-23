@@ -48,6 +48,7 @@ export const PERMISSIONS = {
 
   EXPENSES_VIEW: 'expenses.view',
   EXPENSES_CREATE: 'expenses.create',
+  EXPENSES_DELETE: 'expenses.delete',
 
   ACCOUNTS_VIEW: 'accounts.view',
   ACCOUNTS_TRANSFER: 'accounts.transfer',
