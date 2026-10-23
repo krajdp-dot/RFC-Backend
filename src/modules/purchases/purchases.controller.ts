@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { PurchasesService } from './purchases.service.js';
 import { CreatePurchaseDto } from './dto/create-purchase.dto.js';
 import { PaginationDto } from '../../common/dto/pagination.dto.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../auth/authorization/require-permission.decorator.js';
 import { PERMISSIONS } from '../auth/authorization/permissions.js';
 
@@ -39,6 +40,18 @@ export class PurchasesController {
   @RequirePermission(PERMISSIONS.PURCHASES_CREATE)
   create(@CurrentBusiness() businessId: string, @Body() dto: CreatePurchaseDto) {
     return this.purchasesService.createPurchase(businessId, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a mistaken purchase only when unpaid and unused' })
+  @RequirePermission(PERMISSIONS.PURCHASES_DELETE)
+  deletePurchase(
+    @CurrentBusiness() businessId: string,
+    @Param('id') id: string,
+    @CurrentUser('userId') userId: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.purchasesService.deletePurchase(businessId, id, userId, body?.reason);
   }
 
   @Post('returns')
