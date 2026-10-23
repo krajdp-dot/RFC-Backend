@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -23,6 +24,7 @@ import {
 import { UpdateProductDto } from './dto/update-product.dto.js';
 import { PaginationDto } from '../../common/dto/pagination.dto.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../auth/authorization/require-permission.decorator.js';
 import { PERMISSIONS } from '../auth/authorization/permissions.js';
 
@@ -91,6 +93,18 @@ export class ProductsController {
       id,
       dto,
     );
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Remove product from active catalogue while preserving historical records' })
+  @RequirePermission(PERMISSIONS.PRODUCTS_DELETE)
+  async deleteProduct(
+    @CurrentBusiness() businessId: string,
+    @Param('id') id: string,
+    @CurrentUser('userId') userId: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.productsService.deleteProduct(businessId, id, userId, body?.reason);
   }
 
   @Get(':id/freshness-profile')
