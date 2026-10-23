@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ExpensesService } from './expenses.service.js';
 import { CreateExpenseDto } from './dto/create-expense.dto.js';
 import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto.js';
 import { PaginationDto } from '../../common/dto/pagination.dto.js';
 import { CurrentBusiness } from '../../common/decorators/current-business.decorator.js';
+import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
 import { RequirePermission } from '../auth/authorization/require-permission.decorator.js';
 import { PERMISSIONS } from '../auth/authorization/permissions.js';
 
