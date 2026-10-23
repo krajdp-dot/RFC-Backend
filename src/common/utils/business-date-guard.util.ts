@@ -49,7 +49,10 @@ export async function assertBusinessDateOpen(
   const bDate = parseBusinessDate(businessDateInput);
   const dateKey = formatBusinessDate(bDate);
 
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${lockNamespace(businessId)}), hashtext(${dateKey}))`;
+  // PostgreSQL advisory-lock functions return `void`. Do not select that void
+  // column with Prisma $queryRaw (Prisma cannot deserialize it). Execute the
+  // lock in a subquery and return a supported scalar instead.
+  await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock_shared(hashtext(${lockNamespace(businessId)}), hashtext(${dateKey}))) AS advisory_lock`;
 
   const closed = await tx.dayClose.findFirst({
     where: { businessId, businessDate: bDate },
@@ -79,5 +82,6 @@ export async function lockBusinessDateForClose(
 ): Promise<void> {
   const bDate = parseBusinessDate(businessDateInput);
   const dateKey = formatBusinessDate(bDate);
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockNamespace(businessId)}), hashtext(${dateKey}))`;
+  // The advisory-lock function returns void; expose only a scalar result to Prisma.
+  await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${lockNamespace(businessId)}), hashtext(${dateKey}))) AS advisory_lock`;
 }
