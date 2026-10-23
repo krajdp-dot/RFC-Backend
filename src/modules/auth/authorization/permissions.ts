@@ -29,6 +29,7 @@ export const PERMISSIONS = {
   PURCHASES_VIEW: 'purchases.view',
   PURCHASES_CREATE: 'purchases.create',
   PURCHASES_RETURN: 'purchases.return',
+  PURCHASES_DELETE: 'purchases.delete',
 
   INVENTORY_VIEW: 'inventory.view',
   INVENTORY_ADJUST: 'inventory.adjust',
